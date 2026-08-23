@@ -1,0 +1,847 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>三角洲灵敏度计算器</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0;font-family:system-ui}
+body{background:#12141a;color:#eee;padding:16px;max-width:960px;margin:0 auto}
+#startup-overlay{position:fixed;inset:0;background:#000;z-index:999;display:flex;align-items:center;justify-content:center;color:#fff;font-size:22px;transition:opacity 0.4s}
+#startup-overlay.hidden{opacity:0;pointer-events:none}
+#main-app{opacity:0;transition:opacity 0.4s}
+#main-app.visible{opacity:1}
+.panel{background:#1e222c;padding:16px;border-radius:10px;margin-bottom:14px}
+.row{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin:10px 0}
+input,select{padding:8px 10px;background:#2a2f3b;border:1px solid #444;border-radius:6px;color:#fff;font-size:14px}
+button{padding:9px 14px;background:#2563eb;color:#fff;border:none;border-radius:6px;cursor:pointer}
+button:disabled{background:#333;color:#888;cursor:not-allowed}
+.txt-sm{color:#aaa;font-size:13px}
+#zone{width:100%;height:260px;background:#171a22;border:1px solid #333;border-radius:8px;position:relative;overflow:hidden;margin:12px 0}
+#targetDot,#moveBall{width:32px;height:32px;border-radius:50%;position:absolute;display:none;cursor:crosshair}
+#targetDot{background:#ef4444}
+#moveBall{background:#22c55e}
+.history-item{padding:8px;background:#272b36;border-radius:6px;margin:6px 0;cursor:pointer}
+.history-time{color:#888;font-size:12px;margin-top:2px}
+
+/* ==========全屏测试容器========== */
+#fullscreenTestWrap{
+    position:fixed;
+    inset:0;
+    background:#0f1117;
+    display:none;
+    cursor:crosshair;
+    overflow:hidden;
+}
+#fullscreenTestWrap:fullscreen{
+    display:block;
+    background:#0f1117;
+}
+#fullscreenOverlayUi{
+    position:fixed;
+    top:12px;
+    left:12px;
+    z-index:9999;
+    color:#fff;
+    background:rgba(0,0,0,0.65);
+    padding:10px 14px;
+    border-radius:8px;
+    font-size:14px;
+}
+#fsTargetDot, #fsMoveBall{
+    width:32px;height:32px;border-radius:50%;position:absolute;display:none;
+}
+#fsTargetDot{background:#ef4444}
+#fsMoveBall{background:#22c55e}
+#fsExitBtn{
+    position:fixed;
+    top:12px;
+    right:12px;
+    z-index:9999;
+    background:#dc2626;
+}
+</style>
+</head>
+<body>
+<div id="startup-overlay">加载中...</div>
+<div id="main-app">
+    <div class="panel">
+        <h3>三角洲行动 灵敏度计算器</h3>
+        <div class="row">
+            <div>
+                <label>DPI</label>
+                <input id="dpi" type="number" value="800">
+            </div>
+            <div>
+                <label>游戏灵敏度</label>
+                <input id="sens" type="number" step="0.01" value="1">
+            </div>
+            <div>
+                <label>画面宽高比</label>
+                <select id="aspectRatio">
+                    <option>16:9</option>
+                    <option>4:3‑bar</option>
+                    <option>4:3‑stretch</option>
+                    <option>16:10‑stretch</option>
+                </select>
+            </div>
+            <div>
+                <label>倍镜模式</label>
+                <select id="scopeMode">
+                    <option value="linear">线性</option>
+                    <option value="classic">经典</option>
+                </select>
+            </div>
+        </div>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;">
+            <button id="calc">计算灵敏度</button>
+            <button id="openFullTest">🎮 打开全屏鼠标测试(整屏幕)</button>
+        </div>
+        <div class="row" style="margin-top:12px">
+            <div>eDPI：<span id="edpi">0</span></div>
+            <div>360°英寸：<span id="inch360">0</span></div>
+            <div>360°厘米：<span id="cm360">0</span></div>
+            <div>拉伸修正系数：<span id="aspectFix">0</span></div>
+            <div>修正灵敏度：<span id="fixedSens">0</span></div>
+        </div>
+        <div class="row">
+            <div>2.5x：<span id="s25">0</span></div>
+            <div>4x：<span id="s4">0</span></div>
+            <div>6x：<span id="s6">0</span></div>
+            <div>8x：<span id="s8">0</span></div>
+        </div>
+    </div>
+
+    <div class="panel">
+        <h4>鼠标位移测试区域（普通窗口模式）</h4>
+        <div id="zone">
+            <div id="targetDot"></div>
+            <div id="moveBall"></div>
+        </div>
+        <div class="row">
+            <div>总移动像素：<span id="dxTotal">0</span></div>
+            <div>旋转角度：<span id="angleShow">0 °</span></div>
+            <button id="resetTest">重置位移测试</button>
+        </div>
+    </div>
+
+    <div class="panel">
+        <h4>反应速度 & 跟枪测试（普通窗口）</h4>
+        <div class="row">
+            <button id="startReaction">开始反应测试(5轮)</button>
+            <button id="startBallTest">开始跟枪测试(6轮)</button>
+            <button id="resetAllReaction">全部重置</button>
+        </div>
+        <div class="row" style="margin-top:10px">
+            <div>平均反应：<span id="avgRt">-- ms</span></div>
+            <div>跟枪得分：<span id="ballScore">--</span></div>
+            <div>推荐360cm：<span id="recCm360">-- cm</span></div>
+            <div>推荐灵敏度：<span id="recGameSens">--</span></div>
+            <div>当前DPI：<span id="recDpiShow">--</span></div>
+        </div>
+    </div>
+
+    <div class="panel">
+        <h4>系统优化导出</h4>
+        <div class="row">
+            <button id="exportOpt">下载一键优化.bat</button>
+            <button id="exportReset">下载还原默认.bat</button>
+        </div>
+    </div>
+
+    <div class="panel">
+        <h4>历史记录</h4>
+        <div id="historyWrap"></div>
+        <button id="clearHistory" style="margin-top:8px">清空历史记录</button>
+    </div>
+</div>
+
+<!-- 全屏测试DOM层 -->
+<div id="fullscreenTestWrap">
+    <div id="fullscreenOverlayUi">
+        <div>总像素位移：<span id="fsDxTotal">0</span></div>
+        <div>旋转角度：<span id="fsAngleShow">0 °</span></div>
+        <div>平均反应：<span id="fsAvgRt">-- ms</span></div>
+        <div>跟枪得分：<span id="fsBallScore">--</span></div>
+        <div style="margin-top:6px;font-size:12px;color:#aaa;">按ESC或者点击退出按钮返回</div>
+    </div>
+    <button id="fsExitBtn">退出全屏测试</button>
+    <div id="fsTargetDot"></div>
+    <div id="fsMoveBall"></div>
+</div>
+
+<script>
+    // ==========开场动画修复【双重兜底，防止浏览器休眠卡死】==========
+    const overlay = document.getElementById('startup-overlay');
+    const mainApp = document.getElementById('main-app');
+
+    function hideStartupOverlay() {
+        overlay.classList.add('hidden');
+        mainApp.classList.add('visible');
+    }
+    const startupTimer = setTimeout(hideStartupOverlay, 2400);
+    document.addEventListener('visibilitychange', () => {
+        if (!document.hidden) {
+            clearTimeout(startupTimer);
+            hideStartupOverlay();
+        }
+    });
+
+    // 灵敏度计算
+    const dpiEl = document.getElementById('dpi');
+    const sensEl = document.getElementById('sens');
+    const aspectRatioEl = document.getElementById('aspectRatio');
+    const scopeModeEl = document.getElementById('scopeMode');
+    const edpiEl = document.getElementById('edpi');
+    const cm360El = document.getElementById('cm360');
+    const inch360El = document.getElementById('inch360');
+    const aspectFixEl = document.getElementById('aspectFix');
+    const fixedSensEl = document.getElementById('fixedSens');
+    const s25El = document.getElementById('s25');
+    const s4El = document.getElementById('s4');
+    const s6El = document.getElementById('s6');
+    const s8El = document.getElementById('s8');
+    const calcBtn = document.getElementById('calc');
+    const historyWrap = document.getElementById('historyWrap');
+    const clearHistoryBtn = document.getElementById('clearHistory');
+
+    const STORAGE_KEY_CURRENT = "delta_current_param";
+    const STORAGE_KEY_HISTORY = "delta_sens_history";
+    const MAX_HISTORY = 20;
+
+    function getHistory(){
+        const raw = localStorage.getItem(STORAGE_KEY_HISTORY);
+        if(!raw) return [];
+        try{return JSON.parse(raw);}catch{return [];}
+    }
+    function saveHistory(arr){
+        localStorage.setItem(STORAGE_KEY_HISTORY, JSON.stringify(arr));
+    }
+    function addHistoryItem(item){
+        let arr = getHistory();
+        arr.unshift(item);
+        if(arr.length > MAX_HISTORY) arr = arr.slice(0,MAX_HISTORY);
+        saveHistory(arr);
+        renderHistory();
+    }
+    function renderHistory(){
+        const arr = getHistory();
+        historyWrap.innerHTML = "";
+        if(arr.length === 0){
+            historyWrap.innerHTML = `<div class="txt-sm">暂无记录，点击计算灵敏度会自动保存记录</div>`;
+            return;
+        }
+        arr.forEach((it)=>{
+            const div = document.createElement('div');
+            div.className = "history-item";
+            div.innerHTML = `
+                <div>DPI:${it.dpi}｜灵敏度:${it.sens}｜宽高比:${it.aspect}｜eDPI:${it.edpi}</div>
+                <div class="history-time">${it.timeStr}</div>
+            `;
+            div.onclick = ()=>{
+                dpiEl.value = it.dpi;
+                sensEl.value = it.sens;
+                aspectRatioEl.value = it.aspect ?? "16:9";
+                compute();
+            }
+            historyWrap.appendChild(div);
+        })
+    }
+    clearHistoryBtn.onclick = ()=>{
+        if(confirm("确定清空全部历史记录？此操作不可恢复")){
+            saveHistory([]);
+            renderHistory();
+        }
+    }
+
+    function loadLastParam(){
+        const str = localStorage.getItem(STORAGE_KEY_CURRENT);
+        if(str){
+            try{
+                const obj = JSON.parse(str);
+                dpiEl.value = obj.dpi;
+                sensEl.value = obj.sens;
+                aspectRatioEl.value = obj.aspect || "16:9";
+            }catch(e){}
+        }
+        compute();
+        renderHistory();
+    }
+
+    function compute(){
+        let dpi = Number(dpiEl.value) || 800;
+        let sens = Number(sensEl.value) || 1;
+        dpi = Math.max(10, dpi);
+        sens = Math.max(0.01, sens);
+        dpiEl.value = dpi;
+        sensEl.value = sens;
+
+        const aspect = aspectRatioEl.value;
+        const mode = scopeModeEl.value;
+        const edpi = dpi * sens;
+        const inch360 = 360 / (edpi * 0.022);
+        const cm360 = inch360 * 2.54;
+
+        edpiEl.innerText = edpi.toFixed(1);
+        inch360El.innerText = inch360.toFixed(2) + ' inch';
+        cm360El.innerText = cm360.toFixed(2) + ' cm';
+
+        let fixFactor = 1.0;
+        if(aspect === "4:3-stretch") fixFactor = 0.75;
+        else if(aspect === "16:10-stretch") fixFactor = 0.90;
+        else if(aspect === "16:9" || aspect === "4:3-bar") fixFactor = 1.0;
+
+        aspectFixEl.innerText = fixFactor.toFixed(3);
+        fixedSensEl.innerText = (sens * fixFactor).toFixed(3);
+
+        let m25,m4,m6,m8;
+        if(mode === "linear"){
+            m25 = sens / Math.sqrt(2.5);
+            m4 = sens / Math.sqrt(4);
+            m6 = sens / Math.sqrt(6);
+            m8 = sens / Math.sqrt(8);
+        }else{
+            m25 = sens / 2.5;
+            m4 = sens / 4;
+            m6 = sens / 6;
+            m8 = sens / 8;
+        }
+        s25El.innerText = m25.toFixed(3);
+        s4El.innerText = m4.toFixed(3);
+        s6El.innerText = m6.toFixed(3);
+        s8El.innerText = m8.toFixed(3);
+
+        localStorage.setItem(STORAGE_KEY_CURRENT, JSON.stringify({dpi,sens,aspect}));
+        const now = new Date();
+        const timeStr = now.toLocaleString();
+        addHistoryItem({
+            dpi,
+            sens,
+            aspect,
+            edpi:edpi.toFixed(1),
+            cm360:cm360.toFixed(2),
+            timeStr
+        });
+    }
+
+    calcBtn.onclick = compute;
+    loadLastParam();
+
+    // =========普通窗口鼠标位移测试==========
+    const zone = document.getElementById('zone');
+    const dxTotalEl = document.getElementById('dxTotal');
+    const angleShowEl = document.getElementById('angleShow');
+    const resetBtn = document.getElementById('resetTest');
+
+    let drag = false;
+    let lastX = 0;
+    let totalDx = 0;
+    let angle = 0;
+
+    zone.addEventListener('mousedown', e => {
+        drag = true;
+        lastX = e.clientX;
+    });
+
+    window.addEventListener('mousemove', e => {
+        if (!drag) return;
+        const dx = e.clientX - lastX;
+        totalDx += Math.abs(dx);
+        const sens = Number(sensEl.value);
+        angle += dx * sens * 0.045;
+        lastX = e.clientX;
+
+        dxTotalEl.innerText = totalDx;
+        angleShowEl.innerText = angle.toFixed(1) + ' °';
+    });
+
+    window.addEventListener('mouseup', () => { drag = false; });
+    window.addEventListener('blur', ()=>{ drag = false; });
+
+    resetBtn.onclick = () => {
+        totalDx = 0;
+        angle = 0;
+        dxTotalEl.innerText = 0;
+        angleShowEl.innerText = '0 °';
+    };
+
+    // ========== 普通窗口 点击反应测试 ==========
+    const targetDot = document.getElementById('targetDot');
+    const startReactionBtn = document.getElementById('startReaction');
+    const resetAllReactionBtn = document.getElementById('resetAllReaction');
+    const avgRtEl = document.getElementById('avgRt');
+    const recCm360El = document.getElementById('recCm360');
+    const recGameSensEl = document.getElementById('recGameSens');
+    const recDpiShowEl = document.getElementById('recDpiShow');
+
+    let reactionRoundTotal = 5;
+    let currentRound = 0;
+    let hitTimes = [];
+    let showTs = 0;
+    let isReactionRunning = false;
+    let reactionTimerId = null;
+
+    function hideTarget(){ targetDot.style.display = 'none'; }
+    function randomPos(){
+        const w = zone.clientWidth - 40;
+        const h = zone.clientHeight - 40;
+        const x = Math.floor(Math.random() * w);
+        const y = Math.floor(Math.random() * h);
+        targetDot.style.left = x + 'px';
+        targetDot.style.top = y + 'px';
+    }
+
+    function nextReaction(){
+        clearTimeout(reactionTimerId);
+        if(currentRound >= reactionRoundTotal){
+            isReactionRunning = false;
+            startReactionBtn.disabled = false;
+            hideTarget();
+            if(hitTimes.length>0){
+                const avg = hitTimes.reduce((s,v)=>s+v,0)/hitTimes.length;
+                avgRtEl.innerText = avg.toFixed(0)+' ms';
+            }else{
+                avgRtEl.innerText = "未完成测试";
+            }
+            return;
+        }
+        const delay = 400 + Math.random()*900;
+        reactionTimerId = setTimeout(()=>{
+            if(!isReactionRunning) return;
+            randomPos();
+            targetDot.style.display = 'block';
+            showTs = performance.now();
+        },delay);
+    }
+
+    targetDot.onclick = function(e){
+        e.stopPropagation();
+        if(!isReactionRunning) return;
+        const rt = performance.now() - showTs;
+        hitTimes.push(rt);
+        currentRound++;
+        hideTarget();
+        nextReaction();
+    }
+
+    startReactionBtn.onclick = function(){
+        if(isReactionRunning) return;
+        isReactionRunning = true;
+        startReactionBtn.disabled = true;
+        currentRound = 0;
+        hitTimes = [];
+        avgRtEl.innerText = "-- ms";
+        hideTarget();
+        nextReaction();
+    }
+
+    // ==========普通窗口 移动球状跟枪测试 ==========
+    const moveBall = document.getElementById('moveBall');
+    const startBallBtn = document.getElementById('startBallTest');
+    const ballScoreEl = document.getElementById('ballScore');
+
+    let ballRoundTotal = 6;
+    let ballCurrentRound = 0;
+    let ballHitCount = 0;
+    let ballRunning = false;
+    let ballVx = 0, ballVy = 0;
+    let ballAnimId = null;
+    let ballTimerId = null;
+
+    function hideBall(){
+        moveBall.style.display = 'none';
+        cancelAnimationFrame(ballAnimId);
+        ballAnimId = null;
+    }
+    function resetBallState(){
+        ballCurrentRound = 0;
+        ballHitCount = 0;
+        ballScoreEl.innerText = "--";
+        hideBall();
+    }
+
+    function spawnBall(){
+        const w = zone.clientWidth - 34;
+        const h = zone.clientHeight -34;
+        let x = Math.random()*w;
+        let y = Math.random()*h;
+        moveBall.style.left = x+'px';
+        moveBall.style.top = y+'px';
+        moveBall.style.display = 'block';
+        ballVx = (Math.random()-0.5)*1.6;
+        ballVy = (Math.random()-0.5)*1.6;
+    }
+
+    function ballAnimate(){
+        if(!ballRunning){ ballAnimId=null; return; }
+        let x = parseFloat(moveBall.style.left);
+        let y = parseFloat(moveBall.style.top);
+        x += ballVx;
+        y += ballVy;
+        const w = zone.clientWidth - 34;
+        const h = zone.clientHeight -34;
+        if(x<=0){x=0; ballVx *= -1;}
+        if(x>=w){x=w; ballVx *= -1;}
+        if(y<=0){y=0; ballVy *= -1;}
+        if(y>=h){y=h; ballVy *= -1;}
+        moveBall.style.left = x+'px';
+        moveBall.style.top = y+'px';
+        ballAnimId = requestAnimationFrame(ballAnimate);
+    }
+
+    function calcRecommendSensitivity(){
+        const dpi = Number(dpiEl.value)||800;
+        recDpiShowEl.innerText = dpi;
+        let avgRt;
+        if(hitTimes.length>0){
+            avgRt = hitTimes.reduce((s,v)=>s+v,0)/hitTimes.length;
+        }else{
+            avgRt = 280;
+        }
+        const score = Math.round((ballHitCount / ballRoundTotal)*100);
+        let baseCm;
+        const scoreWeight = 0.6;
+        const rtWeight = 0.4;
+        const scoreFactor = (100-score)/100 * 30;
+        const rtFactor = Math.max(0,(avgRt-220)/220)*25;
+        const totalOffset = scoreFactor*scoreWeight + rtFactor*rtWeight;
+        baseCm = 24 + totalOffset;
+        const cmLow = Math.max(20,Math.round(baseCm*0.9));
+        const cmHigh = Math.round(baseCm*1.25);
+        const recCmText = `${cmLow}‑${cmHigh}`;
+        recCm360El.innerText = recCmText + " cm";
+        const cmMid = (cmLow+cmHigh)/2;
+        const inchMid = cmMid / 2.54;
+        const eDpiRec = 360/(inchMid*0.022);
+        const gameSensRec = eDpiRec / dpi;
+        recGameSensEl.innerText = gameSensRec.toFixed(3);
+    }
+
+    function nextBallTest(){
+        clearTimeout(ballTimerId);
+        if(ballCurrentRound >= ballRoundTotal){
+            ballRunning = false;
+            startBallBtn.disabled = false;
+            hideBall();
+            const score = Math.round((ballHitCount / ballRoundTotal)*100);
+            ballScoreEl.innerText = score + " 分";
+            calcRecommendSensitivity();
+            return;
+        }
+        ballTimerId = setTimeout(()=>{
+            if(!ballRunning) return;
+            spawnBall();
+            ballAnimate();
+        },600);
+    }
+
+    let ballClickLock = false;
+    moveBall.onclick = function(e){
+        e.stopPropagation();
+        if(!ballRunning || ballClickLock) return;
+        ballClickLock = true;
+        ballHitCount++;
+        ballCurrentRound++;
+        hideBall();
+        setTimeout(()=>{ballClickLock=false;},200);
+        nextBallTest();
+    }
+
+    startBallBtn.onclick = function(){
+        if(ballRunning) return;
+        resetBallState();
+        ballRunning = true;
+        startBallBtn.disabled = true;
+        nextBallTest();
+    }
+
+    resetAllReactionBtn.onclick = function(){
+        isReactionRunning = false;
+        ballRunning = false;
+        clearTimeout(reactionTimerId);
+        clearTimeout(ballTimerId);
+        cancelAnimationFrame(ballAnimId);
+        ballAnimId = null;
+        startReactionBtn.disabled = false;
+        startBallBtn.disabled = false;
+        hideTarget();
+        hideBall();
+        resetBallState();
+        avgRtEl.innerText = "-- ms";
+        recCm360El.innerText = "-- cm";
+        recGameSensEl.innerText = "--";
+    }
+
+    // ============【全屏测试模块】============
+    const fullscreenTestWrap = document.getElementById("fullscreenTestWrap");
+    const openFullTestBtn = document.getElementById("openFullTest");
+    const fsExitBtn = document.getElementById("fsExitBtn");
+    const fsDxTotalEl = document.getElementById("fsDxTotal");
+    const fsAngleShowEl = document.getElementById("fsAngleShow");
+    const fsAvgRtEl = document.getElementById("fsAvgRt");
+    const fsBallScoreEl = document.getElementById("fsBallScore");
+    const fsTargetDot = document.getElementById("fsTargetDot");
+    const fsMoveBall = document.getElementById("fsMoveBall");
+
+    let fsDrag = false;
+    let fsLastX = 0;
+    let fsTotalDx = 0;
+    let fsAngle = 0;
+    let fsHitTimes = [];
+    let fsShowTs = 0;
+    let fsIsReactionRunning = false;
+    let fsCurrentRound = 0;
+    let fsBallRunning = false;
+    let fsBallCurrentRound = 0;
+    let fsBallHitCount = 0;
+    let fsBallVx=0,fsBallVy=0;
+    let fsBallAnimId=null;
+    let fsBallClickLock=false;
+    let fsReactionTimerId=null;
+    let fsBallTimerId=null;
+
+    function fsHardResetAll(){
+        fsDrag = false;
+        fsIsReactionRunning = false;
+        fsBallRunning = false;
+        clearTimeout(fsReactionTimerId);
+        clearTimeout(fsBallTimerId);
+        cancelAnimationFrame(fsBallAnimId);
+        fsBallAnimId = null;
+        fsTargetDot.style.display="none";
+        fsMoveBall.style.display="none";
+    }
+
+    function enterFullScreen(el){
+        if(el.requestFullscreen) el.requestFullscreen();
+        else if(el.webkitRequestFullscreen) el.webkitRequestFullscreen();
+    }
+    function exitFullScreen(){
+        fsHardResetAll();
+        if(document.exitFullscreen) document.exitFullscreen();
+        else if(document.webkitExitFullscreen) document.webkitExitFullscreen();
+    }
+    openFullTestBtn.onclick = ()=>{
+        fsHardResetAll();
+        fsTotalDx = 0; fsAngle = 0; fsDxTotalEl.innerText=0; fsAngleShowEl.innerText="0 °";
+        fsHitTimes=[]; fsAvgRtEl.innerText="-- ms"; fsBallScoreEl.innerText="--";
+        enterFullScreen(fullscreenTestWrap);
+    }
+    fsExitBtn.onclick = exitFullScreen;
+
+    document.addEventListener("fullscreenchange",()=>{
+        if(!document.fullscreenElement){
+            fsHardResetAll();
+        }
+    });
+    //页面失焦强制终止全屏全部逻辑，防后台跑逻辑
+    document.addEventListener('visibilitychange',()=>{
+        if(document.fullscreenElement && document.hidden){
+            exitFullScreen();
+        }
+    });
+
+    //全屏鼠标位移
+    fullscreenTestWrap.addEventListener("mousedown",e=>{
+        fsDrag = true;
+        fsLastX = e.clientX;
+    });
+    window.addEventListener("mousemove",e=>{
+        if(!fsDrag || !document.fullscreenElement) return;
+        const dx = e.clientX - fsLastX;
+        fsTotalDx += Math.abs(dx);
+        const sens = Number(sensEl.value);
+        fsAngle += dx * sens * 0.045;
+        fsLastX = e.clientX;
+        fsDxTotalEl.innerText = fsTotalDx;
+        fsAngleShowEl.innerText = fsAngle.toFixed(1)+" °";
+    });
+    window.addEventListener("mouseup",()=>{fsDrag=false;});
+    window.addEventListener("blur",()=>{fsDrag=false;});
+
+    function fsHideTarget(){fsTargetDot.style.display="none";}
+    function fsRandomPos(){
+        const w = window.innerWidth - 40;
+        const h = window.innerHeight -40;
+        const x = Math.floor(Math.random()*w);
+        const y = Math.floor(Math.random()*h);
+        fsTargetDot.style.left = x+"px";
+        fsTargetDot.style.top = y+"px";
+    }
+    function fsNextReaction(){
+        clearTimeout(fsReactionTimerId);
+        if(fsCurrentRound >= reactionRoundTotal){
+            fsIsReactionRunning = false;
+            fsHideTarget();
+            if(fsHitTimes.length>0){
+                const avg = fsHitTimes.reduce((s,v)=>s+v,0)/fsHitTimes.length;
+                fsAvgRtEl.innerText = avg.toFixed(0)+" ms";
+            }
+            return;
+        }
+        const delay = 400+Math.random()*900;
+        fsReactionTimerId = setTimeout(()=>{
+            if(!fsIsReactionRunning || !document.fullscreenElement) return;
+            fsRandomPos();
+            fsTargetDot.style.display="block";
+            fsShowTs = performance.now();
+        },delay);
+    }
+    fsTargetDot.onclick = function(e){
+        e.stopPropagation();
+        if(!fsIsReactionRunning) return;
+        const rt = performance.now() - fsShowTs;
+        fsHitTimes.push(rt);
+        fsCurrentRound++;
+        fsHideTarget();
+        fsNextReaction();
+    };
+
+    //全屏跟枪小球
+    function fsHideBall(){fsMoveBall.style.display="none";cancelAnimationFrame(fsBallAnimId);fsBallAnimId=null;}
+    function fsSpawnBall(){
+        const w = window.innerWidth -34;
+        const h = window.innerHeight -34;
+        const x = Math.random()*w;
+        const y = Math.random()*h;
+        fsMoveBall.style.left = x+"px";
+        fsMoveBall.style.top = y+"px";
+        fsMoveBall.style.display="block";
+        fsBallVx = (Math.random()-0.5)*2.2;
+        fsBallVy = (Math.random()-0.5)*2.2;
+    }
+    function fsBallAnimate(){
+        if(!fsBallRunning || !document.fullscreenElement){ fsBallAnimId=null; return; }
+        let x = parseFloat(fsMoveBall.style.left);
+        let y = parseFloat(fsMoveBall.style.top);
+        x += fsBallVx; y += fsBallVy;
+        const w = window.innerWidth -34;
+        const h = window.innerHeight -34;
+        if(x<=0){x=0;fsBallVx*=-1;}
+        if(x>=w){x=w;fsBallVx*=-1;}
+        if(y<=0){y=0;fsBallVy*=-1;}
+        if(y>=h){y=h;fsBallVy*=-1;}
+        fsMoveBall.style.left=x+"px";
+        fsMoveBall.style.top=y+"px";
+        fsBallAnimId = requestAnimationFrame(fsBallAnimate);
+    }
+    function fsNextBall(){
+        clearTimeout(fsBallTimerId);
+        if(fsBallCurrentRound >= ballRoundTotal){
+            fsBallRunning = false;
+            fsHideBall();
+            const score = Math.round((fsBallHitCount/ballRoundTotal)*100);
+            fsBallScoreEl.innerText = score + " 分";
+            return;
+        }
+        fsBallTimerId = setTimeout(()=>{
+            if(!fsBallRunning || !document.fullscreenElement) return;
+            fsSpawnBall();
+            fsBallAnimate();
+        },600);
+    }
+    fsMoveBall.onclick = function(e){
+        e.stopPropagation();
+        if(!fsBallRunning || fsBallClickLock) return;
+        fsBallClickLock = true;
+        fsBallHitCount++;
+        fsBallCurrentRound++;
+        fsHideBall();
+        setTimeout(()=>{fsBallClickLock=false;},200);
+        fsNextBall();
+    };
+
+    //浏览器端下载bat文件
+    function downloadTextFile(filename, content){
+        const blob = new Blob([content], {type:"text/plain;charset=gbk"});
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = filename;
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        URL.revokeObjectURL(url);
+    }
+
+    const optBtn = document.getElementById('exportOpt');
+    const resetBtnBat = document.getElementById('exportReset');
+
+    const optBatContent = `@echo off
+chcp 65001 >nul
+title 三角洲行动系统一键优化
+echo ==============================================
+echo         三角洲行动 系统优化脚本
+echo 注意：必须右键【以管理员身份运行】
+echo ==============================================
+net session >nul 2>&1
+if %errorlevel% NEQ 0 (
+    echo 错误：请右键本文件，选择【以管理员身份运行】！
+    pause
+    exit
+)
+
+echo.
+echo [1/3] 关闭Windows鼠标加速
+reg add "HKCU\\Control Panel\\Mouse" /v MouseSpeed /t REG_SZ /d "0" /f
+reg add "HKCU\\Control Panel\\Mouse" /v MouseThreshold1 /t REG_SZ /d "0" /f
+reg add "HKCU\\Control Panel\\Mouse" /v MouseThreshold2 /t REG_SZ /d "0" /f
+echo 鼠标加速已关闭，注销或重启后完全生效。
+
+echo.
+echo [2/3] 设置高性能电源计划
+powercfg -setactive 8c5e7fda-e8bf-4a96-9a85-a6e23a8c635c
+echo 已切换高性能电源模式。
+
+echo.
+echo [3/3] 关闭Xbox游戏栏与DVR
+reg add "HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\GameDVR" /v AppCaptureEnabled /t REG_DWORD /d 0 /f
+reg add "HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\GameBar" /v AllowAutoGameMode /t REG_DWORD /d 1 /f
+reg add "HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\GameBar" /v GameBarEnabled /t REG_DWORD /d 0 /f
+echo Xbox游戏栏已关闭，游戏模式保持开启。
+
+echo.
+echo ==============================================
+echo 优化脚本执行完成！
+echo ==============================================
+pause
+`;
+
+    const resetBatContent = `@echo off
+chcp 65001 >nul
+title 还原系统默认设置
+net session >nul 2>&1
+if %errorlevel% NEQ 0 (
+    echo 错误：请右键本文件，选择【以管理员身份运行】！
+    pause
+    exit
+)
+
+echo.
+echo [1/3] 恢复鼠标默认加速
+reg add "HKCU\\Control Panel\\Mouse" /v MouseSpeed /t REG_SZ /d "1" /f
+reg add "HKCU\\Control Panel\\Mouse" /v MouseThreshold1 /t REG_SZ /d "6" /f
+reg add "HKCU\\Control Panel\\Mouse" /v MouseThreshold2 /t REG_SZ /d "10" /f
+echo 鼠标设置已恢复默认。
+
+echo.
+echo [2/3] 恢复平衡电源计划
+powercfg -setactive 381b4222-f694-41f0-88bb-887c13c3a900
+echo 电源计划已恢复平衡。
+
+echo.
+echo ==============================================
+echo 还原完成！
+echo ==============================================
+pause
+`;
+
+    optBtn.onclick = ()=>{
+        downloadTextFile("一键优化.bat", optBatContent);
+    }
+    resetBtnBat.onclick = ()=>{
+        downloadTextFile("还原默认.bat", resetBatContent);
+    }
+</script>
+</body>
+</html>
